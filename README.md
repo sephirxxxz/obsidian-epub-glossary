@@ -31,4 +31,17 @@ The project is intentionally scoped as an Obsidian plugin. It is not a reusable 
 
 ## Status
 
-Architecture selected; implementation has not started.
+Core implementation is present on `feat/implement-reader`; manual Obsidian verification is still required.
+
+## Local development
+
+```bash
+npm install
+npm run build:dictionary
+npm test
+npm run build
+```
+
+For a local test vault, copy `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/glossary-reader/`, enable the plugin, and open an EPUB from the Vault. See the [manual checklist](docs/manual-test-checklist.md).
+
+The generated dictionary is derived from ECDICT; see [third-party notices](THIRD-PARTY-NOTICES.md).

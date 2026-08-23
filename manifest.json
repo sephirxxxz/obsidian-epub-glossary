@@ -1,0 +1,9 @@
+{
+  "id": "glossary-reader",
+  "name": "Glossary Reader",
+  "version": "0.1.0",
+  "minAppVersion": "1.7.2",
+  "description": "Read EPUB books with persistent offline English-Chinese glosses.",
+  "author": "lixiaoran",
+  "isDesktopOnly": true
+}
