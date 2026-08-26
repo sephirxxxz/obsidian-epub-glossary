@@ -1,17 +1,19 @@
 import ePub, { type Book, type Contents, type NavItem, type Rendition } from "epubjs";
 import { FileView, Notice, type TFile, type WorkspaceLeaf } from "obsidian";
-import { glossKey, insertGloss, normalizeWord, rangeAtPoint, removeGloss } from "./reader-events";
+import { didViewportSizeChange, viewportSizeFromRect, type ViewportSize } from "./layout";
+import { createNavigationRunner, isEditableTarget, navigationDirection, type PageDirection } from "./navigation";
+import { glossKey, insertGloss, rangeAtPoint, removeGloss } from "./reader-events";
 import { lookupWord, type DictionaryEntry } from "./dictionary";
 import type GlossaryReaderPlugin from "./main";
 
 export const EPUB_VIEW_TYPE = "glossary-reader-epub";
 const IGNORE_CLASS = "glossary-reader-decoration";
 const FRAME_CSS = `
-  html, body { background: #fff !important; color: #111 !important; }
-  body { font-family: Georgia, "Times New Roman", serif !important; line-height: 1.65 !important; margin: 0 auto !important; max-width: 46rem !important; padding: 2rem !important; }
+  html, body { background: #fff !important; color: #111 !important; width: 100% !important; min-height: 100% !important; }
+  body { box-sizing: border-box !important; font-family: Georgia, "Times New Roman", serif !important; line-height: 1.65 !important; margin: 0 auto !important; max-width: none !important; overflow-wrap: anywhere !important; padding: clamp(1rem, 4vw, 2.5rem) clamp(1rem, 5vw, 4rem) !important; }
   img, svg { max-width: 100% !important; height: auto !important; }
   ruby { ruby-position: under; }
-  .glossary-reader-decoration rt { color: #6d3fc0; font-size: 0.65em; line-height: 1; }
+  .glossary-reader-decoration rt { color: #6d3fc0; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif; font-size: 0.72em; line-height: 1.1; white-space: nowrap; }
 `;
 
 export class EpubView extends FileView {
@@ -22,6 +24,18 @@ export class EpubView extends FileView {
   private history: string[] = [];
   private activeContentsCleanup: (() => void) | null = null;
   private percentageEl: HTMLSpanElement | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+  private resizeFrame: number | null = null;
+  private lastViewportSize: ViewportSize | null = null;
+
+  private readonly navigate = createNavigationRunner(
+    async (direction: PageDirection): Promise<void> => {
+      if (!this.rendition) return;
+      if (direction === "prev") await this.rendition.prev();
+      else await this.rendition.next();
+    },
+    () => new Notice("页面切换失败，请重新打开这本 EPUB。")
+  );
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: GlossaryReaderPlugin) {
     super(leaf);
@@ -45,6 +59,10 @@ export class EpubView extends FileView {
     this.contentEl.addClass("glossary-reader-view");
     this.createToolbar(file);
     this.readerEl = this.contentEl.createDiv({ cls: "glossary-reader-content" });
+    this.lastViewportSize = null;
+    this.resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => this.scheduleResize());
+    this.resizeObserver?.observe(this.readerEl);
+    window.addEventListener("resize", this.onWindowResize);
 
     const bytes = await this.app.vault.readBinary(file);
     this.book = ePub(bytes);
@@ -61,8 +79,9 @@ export class EpubView extends FileView {
       body: { "font-family": "Georgia, 'Times New Roman', serif !important", "line-height": "1.65 !important" },
       "img, svg": { "max-width": "100% !important", height: "auto !important" },
       ruby: { "ruby-position": "under" },
-      ".glossary-reader-decoration rt": { color: "#6d3fc0", "font-size": "0.65em", "line-height": "1" }
+      ".glossary-reader-decoration rt": { color: "#6d3fc0", "font-family": "-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', sans-serif", "font-size": "0.72em", "line-height": "1.1", "white-space": "nowrap" }
     });
+    this.rendition.themes.fontSize(`${this.plugin.state.data.fontSizePercent}%`);
     this.rendition.hooks.content.register((contents: Contents) => {
       void this.bindContents(contents, file);
     });
@@ -80,6 +99,7 @@ export class EpubView extends FileView {
 
     const saved = this.plugin.state.book(file.path).progress?.cfi;
     await this.rendition.display(saved);
+    this.scheduleResize();
     void this.generateLocations();
   }
 
@@ -97,13 +117,13 @@ export class EpubView extends FileView {
     const toolbar = this.contentEl.createDiv({ cls: "glossary-reader-toolbar" });
     this.button(toolbar, "↶", "Return to text", () => void this.goBack());
     this.button(toolbar, "☰", "Table of contents", () => this.toggleToc());
-    this.button(toolbar, "←", "Previous page", () => void this.rendition?.prev());
-    this.button(toolbar, "→", "Next page", () => void this.rendition?.next());
+    this.button(toolbar, "←", "Previous page", () => void this.navigate("prev"));
+    this.button(toolbar, "→", "Next page", () => void this.navigate("next"));
     this.button(toolbar, "A−", "Decrease font size", () => void this.changeFontSize(-10));
     this.button(toolbar, "A+", "Increase font size", () => void this.changeFontSize(10));
     this.percentageEl = toolbar.createEl("span", { text: "—", cls: "glossary-reader-percentage" });
     this.percentageEl.setAttribute("aria-label", `Reading progress for ${file.basename}`);
-    this.contentEl.addEventListener("keydown", this.onKeyDown);
+    this.contentEl.addEventListener("keydown", this.onKeyDown, true);
   }
 
   private button(parent: HTMLElement, label: string, ariaLabel: string, handler: () => void): void {
@@ -112,15 +132,11 @@ export class EpubView extends FileView {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
-    const target = event.target as HTMLElement | null;
-    if (target?.closest("button, input, textarea, select")) return;
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      void this.rendition?.prev();
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      void this.rendition?.next();
-    }
+    if (isEditableTarget(event.target)) return;
+    const direction = navigationDirection(event.key);
+    if (!direction) return;
+    event.preventDefault();
+    void this.navigate(direction);
   };
 
   private async bindContents(contents: Contents, file: TFile): Promise<void> {
@@ -175,7 +191,7 @@ export class EpubView extends FileView {
       const range = rangeAtPoint(contents.document, event.clientX, event.clientY);
       if (!range) return;
       const entry = lookupWord(range.toString());
-      if (entry) this.showDetail(entry);
+      if (entry) this.showAllSenses(entry);
     };
 
     const onLink = (event: MouseEvent): void => {
@@ -189,10 +205,12 @@ export class EpubView extends FileView {
     contents.document.addEventListener("click", onClick);
     contents.document.addEventListener("dblclick", onDoubleClick);
     contents.document.addEventListener("click", onLink, true);
+    contents.document.addEventListener("keydown", this.onKeyDown, true);
     const cleanup = (): void => {
       contents.document.removeEventListener("click", onClick);
       contents.document.removeEventListener("dblclick", onDoubleClick);
       contents.document.removeEventListener("click", onLink, true);
+      contents.document.removeEventListener("keydown", this.onKeyDown, true);
     };
     contents.on("unload", cleanup);
     this.activeContentsCleanup?.();
@@ -204,14 +222,21 @@ export class EpubView extends FileView {
       .some((element) => element.dataset.glossKey === key);
   }
 
-  private showDetail(entry: DictionaryEntry): void {
+  private showAllSenses(entry: DictionaryEntry): void {
     this.contentEl.querySelector(".glossary-reader-detail")?.remove();
     const card = this.contentEl.createDiv({ cls: "glossary-reader-detail" });
+    card.createEl("h3", { text: "全部释义" });
     card.createEl("strong", { text: entry.word });
     if (entry.ipa) card.createEl("div", { text: `/${entry.ipa}/` });
-    card.createEl("p", { text: entry.detailZh });
-    card.createEl("p", { text: entry.detailEn });
+    this.addSenseList(card, "中文释义", entry.chineseSenses);
+    this.addSenseList(card, "English definitions", entry.englishSenses);
     card.createEl("button", { text: "Close" }).addEventListener("click", () => card.remove());
+  }
+
+  private addSenseList(parent: HTMLElement, heading: string, senses: string[]): void {
+    parent.createEl("h4", { text: heading });
+    const list = parent.createEl("ul");
+    for (const sense of senses) list.createEl("li", { text: sense });
   }
 
   private toggleToc(): void {
@@ -245,7 +270,7 @@ export class EpubView extends FileView {
 
   private currentCfi(): string | undefined {
     const location = this.rendition?.currentLocation();
-    if (!location || location instanceof Promise) return undefined;
+    if (!location || typeof (location as unknown as { then?: unknown }).then === "function") return undefined;
     return location.cfi;
   }
 
@@ -261,9 +286,13 @@ export class EpubView extends FileView {
 
   private async generateLocations(): Promise<void> {
     if (!this.book) return;
-    await this.book.locations.generate(1600);
-    const location = await this.rendition?.currentLocation();
-    this.updatePercentage(location?.percentage);
+    try {
+      await this.book.locations.generate(1600);
+      const location = await this.rendition?.currentLocation();
+      this.updatePercentage(location?.percentage);
+    } catch {
+      new Notice("无法计算整本书的阅读百分比，但不影响翻页。", 5000);
+    }
   }
 
   private updatePercentage(value: number | undefined): void {
@@ -273,7 +302,14 @@ export class EpubView extends FileView {
   }
 
   private async destroyReader(): Promise<void> {
-    this.contentEl.removeEventListener("keydown", this.onKeyDown);
+    this.contentEl.removeEventListener("keydown", this.onKeyDown, true);
+    window.removeEventListener("resize", this.onWindowResize);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (this.resizeFrame !== null) {
+      window.cancelAnimationFrame(this.resizeFrame);
+      this.resizeFrame = null;
+    }
     this.activeContentsCleanup?.();
     this.activeContentsCleanup = null;
     this.rendition?.destroy();
@@ -283,5 +319,29 @@ export class EpubView extends FileView {
     this.readerEl = null;
     this.tocEl = null;
     this.history = [];
+  }
+
+  private readonly onWindowResize = (): void => {
+    this.scheduleResize();
+  };
+
+  private scheduleResize(): void {
+    if (this.resizeFrame !== null) return;
+    this.resizeFrame = window.requestAnimationFrame(() => {
+      this.resizeFrame = null;
+      this.resizeRendition();
+    });
+  }
+
+  private resizeRendition(): void {
+    if (!this.rendition || !this.readerEl) return;
+    const next = viewportSizeFromRect(this.readerEl.getBoundingClientRect());
+    if (!didViewportSizeChange(this.lastViewportSize, next) || !next) return;
+    this.lastViewportSize = next;
+    try {
+      this.rendition.resize(next.width, next.height);
+    } catch {
+      new Notice("阅读区域尺寸更新失败，请重新打开这本 EPUB。", 5000);
+    }
   }
 }

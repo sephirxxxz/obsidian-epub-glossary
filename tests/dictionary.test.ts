@@ -6,9 +6,14 @@ describe("lookupWord", () => {
     expect(lookupWord("example")).toEqual({
       word: "example",
       ipa: "ig'zæmpl",
-      shortZh: "例子",
+      shortZh: "例子、样本、实例",
       detailZh: "n. 例子, 样本, 实例\n[化] 实例",
-      detailEn: "n. an item of information that is typical of a class or group\nn. punishment intended as a warning to others"
+      detailEn: "n. an item of information that is typical of a class or group\nn. punishment intended as a warning to others",
+      chineseSenses: ["n. 例子, 样本, 实例", "[化] 实例"],
+      englishSenses: [
+        "n. an item of information that is typical of a class or group",
+        "n. punishment intended as a warning to others"
+      ]
     });
   });
 

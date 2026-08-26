@@ -2,7 +2,7 @@
 
 ## Product promise
 
-Glossary Reader lets one read a DRM-free English EPUB in Obsidian and understand an unfamiliar word without leaving the page. A click places and saves one short Chinese gloss under the original word; a double-click opens a full local dictionary card.
+Glossary Reader lets one read a DRM-free English EPUB in Obsidian and understand an unfamiliar word without leaving the page. A click places and saves one short Chinese gloss under the original word; a double-click opens a local card containing all available Chinese and English senses.
 
 Obsidian is the host application only. The plugin does not create Markdown vocabulary notes, a book-library page, a cloud account, or a separate reader application.
 

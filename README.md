@@ -8,10 +8,11 @@ The project is intentionally scoped as an Obsidian plugin. It is not a reusable 
 
 - Open an `.epub` file directly inside Obsidian.
 - Read one paginated page at a time with keyboard and button navigation.
+- Use all keyboard arrow keys: Left/Up for previous page and Right/Down for next page.
 - Preserve the current reading position and show whole-book progress.
-- Change one global font-size setting without stretching or losing book images.
+- Adapt the rendition when the Obsidian pane or app zoom changes, without stretching or losing book images.
 - Click an English word to save and show a short Chinese gloss below it.
-- Double-click a word to open a fuller local dictionary entry.
+- Double-click a word to show all available local Chinese and English senses.
 - Keep saved glosses attached after reopening the book or changing layout.
 - Work offline and keep the original EPUB unchanged.
 
@@ -22,6 +23,8 @@ The project is intentionally scoped as an Obsidian plugin. It is not a reusable 
 - Storage: Obsidian plugin `data.json`.
 - Dictionary: bundled ECDICT English-Chinese data; exact lookup first, then lemma fallback.
 - No PDF, DRM bypass, cloud sync, accounts, telemetry, or network translation.
+
+The glosses and the “全部释义” card come from the bundled ECDICT dataset. The reader now shows the available senses in a clearer format, but an offline dictionary cannot guarantee that every context-specific translation is perfect.
 
 ## Design documents
 

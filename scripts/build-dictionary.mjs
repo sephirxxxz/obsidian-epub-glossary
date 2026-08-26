@@ -9,11 +9,30 @@ const words = source
   .sort((a, b) => Number(a.frq) - Number(b.frq) || a.word.localeCompare(b.word))
   .slice(0, limit);
 
+function senseLines(value) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^\[网络\]/.test(line));
+}
+
+function shortTranslation(value) {
+  const parts = [];
+  for (const line of senseLines(value)) {
+    const clean = line.replace(/^(?:[a-z]+\.\s*)+/i, "").trim();
+    for (const part of clean.split(/[;,，；]/)) {
+      const item = part.trim();
+      if (item && !parts.includes(item)) parts.push(item);
+      if (parts.length === 3) return parts.join("、");
+    }
+  }
+  return parts.join("、");
+}
+
 const dictionary = {};
 for (const row of words) {
   const translation = String(row.translation ?? "").replaceAll("\\n", "\n").trim();
-  const firstLine = translation.split(/\r?\n/)[0]?.trim() ?? "";
-  const shortZh = (firstLine.replace(/^[a-z]+\.\s*/i, "").split(/[;,，；]/)[0] ?? firstLine).trim();
+  const shortZh = shortTranslation(translation);
   dictionary[row.word.toLowerCase()] = [
     String(row.phonetic ?? "").trim(),
     shortZh,
